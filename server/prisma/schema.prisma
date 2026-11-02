@@ -1,0 +1,10 @@
+// Core models (Aritra). Teammates add their own files in prisma/models/.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
