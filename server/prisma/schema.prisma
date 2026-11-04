@@ -11,44 +11,38 @@ datasource db {
 
 model User {
   id           Int       @id @default(autoincrement())
-  username     String    @unique @db.VarChar(20)
-  passwordHash String    @map("password_hash")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  username     String    @unique
+  passwordHash String
+  createdAt    DateTime  @default(now())
   sessions     Session[]
   messages     Message[]
-
-  @@map("users")
 }
 
 // The token is the primary key: random, so it can't be guessed. Logout deletes the row; no expiry.
 model Session {
-  token     String   @id @default(uuid()) @db.Uuid
-  userId    Int      @map("user_id")
+  token     String   @id @default(uuid())
+  userId    Int
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now()) @map("created_at")
-
-  @@map("sessions")
+  createdAt DateTime @default(now())
 }
 
 model Room {
   id        Int       @id @default(autoincrement())
-  name      String    @unique @db.VarChar(30)
-  createdAt DateTime  @default(now()) @map("created_at")
+  name      String    @unique
+  createdAt DateTime  @default(now())
   messages  Message[]
-
-  @@map("rooms")
 }
 
 // userId is nullable: deleting a user keeps their messages as "deleted user" (SET NULL).
 model Message {
   id        Int      @id @default(autoincrement())
-  roomId    Int      @map("room_id")
+  roomId    Int
   room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  userId    Int?     @map("user_id")
+  userId    Int?
   user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  body      String   @db.VarChar(500)
-  createdAt DateTime @default(now()) @map("created_at")
+  body      String
+  createdAt DateTime @default(now())
 
+  // Speeds up "latest 20 messages in room X" (graded DE task, see learning notes).
   @@index([roomId, createdAt])
-  @@map("messages")
 }
