@@ -1,10 +1,12 @@
 import express from 'express';
 import { authRouter } from './routes/auth.js';
+import { messagesRouter } from './routes/messages.js';
 
 export const app = express();
 
 app.use(express.json());
 app.use('/api', authRouter);
+app.use('/api', messagesRouter);
 
 // Catches every error. Unexpected ones are logged, and the client only sees "Server error".
 app.use((err, req, res, next) => {
