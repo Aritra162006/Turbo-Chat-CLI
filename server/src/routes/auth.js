@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { login, signup } from '../services/auth.js';
+import { login, logout, signup } from '../services/auth.js';
+import { requireAuth } from '../middleware/auth.js';
 
 export const authRouter = Router();
 
@@ -22,4 +23,15 @@ authRouter.post('/login', async (req, res) => {
     return res.status(400).json({ error: 'Username and password are required' });
   }
   res.json(await login(username, password));
+});
+
+// Returns who the token belongs to.
+authRouter.get('/me', requireAuth, (req, res) => {
+  res.json(req.user);
+});
+
+// Deletes this session, so the token stops working.
+authRouter.post('/logout', requireAuth, async (req, res) => {
+  await logout(req.token);
+  res.status(204).end();
 });

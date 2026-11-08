@@ -37,3 +37,7 @@ export async function signup(username, password) {
     throw err;
   }
 }
+
+export function logout(token) {
+  return prisma.session.delete({ where: { token } });
+}
