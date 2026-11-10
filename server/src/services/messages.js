@@ -2,10 +2,10 @@ import { prisma } from '../db.js';
 
 const HISTORY_SIZE = 25;
 const MAX_BODY = 500;
-const include = { user: { select: { username: true } }, room: { select: { name: true } } };
+export const include = { user: { select: { username: true } }, room: { select: { name: true } } };
 
 // The one message shape used everywhere (REST history and the live message:new event).
-function toPayload(m) {
+export function toPayload(m) {
   return {
     id: m.id,
     room: m.room.name,
