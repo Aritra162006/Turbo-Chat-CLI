@@ -49,13 +49,3 @@ export function getMessages(token) {
     },
   });
 }
-
-export function sendMessage(token, body) {
-  return request("/rooms/general/messages", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ body }),
-  });
-}
