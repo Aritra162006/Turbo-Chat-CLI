@@ -1,5 +1,5 @@
 
-import { getMessages } from "./api.js";
+import { getMessages, sendMessage } from "./api.js";
 
 export async function showMessages(token) {
   try {
@@ -19,5 +19,16 @@ export async function showMessages(token) {
     console.log("\n==================================\n");
   } catch (error) {
     console.log("Unable to fetch messages:", error.message);
+  }
+}
+
+export async function sendChatMessage(token, body) {
+  try {
+    const message = await sendMessage(token, body);
+
+    console.log("\nMessage sent successfully!");
+    console.log(`${message.username}: ${message.body}`);
+  } catch (error) {
+    console.log("Unable to send message:", error.message);
   }
 }

@@ -3,7 +3,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
 import { registerUser, loginUser } from "./auth.js";
-import { showMessages } from "./chat.js";
+import { showMessages, sendChatMessage } from "./chat.js";
 
 const rl = createInterface({ input: stdin, output: stdout });
 
@@ -52,7 +52,8 @@ async function main() {
 
     } else {
       console.log("\n1. View General Chat History");
-      console.log("2. Logout");
+      console.log("2. Send Message");
+      console.log("3. Logout");
 
       const choice = await rl.question("\nChoose an option: ");
 
@@ -60,6 +61,15 @@ async function main() {
         await showMessages(token);
 
       } else if (choice === "2") {
+        const body = await rl.question("\nEnter your message: ");
+
+        if (!body.trim()) {
+          console.log("Message cannot be empty!");
+        } else {
+          await sendChatMessage(token, body);
+        }
+
+      } else if (choice === "3") {
         token = null;
         currentUser = null;
         console.log("Logged out successfully!");
@@ -77,4 +87,3 @@ main().catch((error) => {
   console.error("Application error:", error.message);
   rl.close();
 });
-
