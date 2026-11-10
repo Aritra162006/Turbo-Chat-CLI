@@ -38,6 +38,16 @@ export async function signup(username, password) {
   }
 }
 
+// Finds the user who owns a session token, or null. Used by REST and socket.io.
+export async function findUserByToken(token) {
+  if (!token) return null;
+  const session = await prisma.session.findUnique({
+    where: { token },
+    include: { user: { select: { id: true, username: true } } },
+  });
+  return session?.user ?? null;
+}
+
 export function logout(token) {
   return prisma.session.delete({ where: { token } });
 }

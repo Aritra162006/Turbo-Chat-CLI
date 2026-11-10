@@ -1,14 +1,11 @@
-import { prisma } from '../db.js';
+import { findUserByToken } from '../services/auth.js';
 
-// Reads "Authorization: Bearer <token>", finds the session, and sets req.user and req.token. Rejects with 401 if the token is missing or unknown.
+// Reads "Authorization: Bearer <token>", finds the user, and sets req.user and req.token. Rejects with 401 if the token is missing or unknown.
 export async function requireAuth(req, res, next) {
   const token = req.get('Authorization')?.replace(/^Bearer /, '');
-  const session = token && (await prisma.session.findUnique({
-    where: { token },
-    include: { user: { select: { id: true, username: true } } },
-  }));
-  if (!session) return res.status(401).json({ error: 'Not logged in' });
-  req.user = session.user;
+  const user = await findUserByToken(token);
+  if (!user) return res.status(401).json({ error: 'Not logged in' });
+  req.user = user;
   req.token = token;
   next();
 }
