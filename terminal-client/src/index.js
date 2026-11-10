@@ -1,9 +1,12 @@
-
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
 import { registerUser, loginUser } from "./auth.js";
-import { showMessages, sendChatMessage } from "./chat.js";
+import {
+  showMessages,
+  sendChatMessage,
+  startLiveChat
+} from "./chat.js";
 
 const rl = createInterface({ input: stdin, output: stdout });
 
@@ -53,7 +56,8 @@ async function main() {
     } else {
       console.log("\n1. View General Chat History");
       console.log("2. Send Message");
-      console.log("3. Logout");
+      console.log("3. Live Chat");
+      console.log("4. Logout");
 
       const choice = await rl.question("\nChoose an option: ");
 
@@ -70,6 +74,9 @@ async function main() {
         }
 
       } else if (choice === "3") {
+        await startLiveChat(token, rl);
+
+      } else if (choice === "4") {
         token = null;
         currentUser = null;
         console.log("Logged out successfully!");
