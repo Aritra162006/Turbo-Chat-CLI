@@ -35,4 +35,34 @@ _To be written by Adarsh._
 
 ## DMs and stats (Prem)
 
-_To be written by Prem._
+### REST
+
+All endpoints require authentication.
+
+| Method and path | Body / Query | Success | Errors |
+|---|---|---|---|
+| `GET /api/dms` | — | 200: array of conversations `{ username, lastMessage, unread }` | 401 |
+| `GET /api/dms/:username/messages` | Optional `before=<id>` | 200: up to 25 messages, oldest first | 400 invalid before, 401, 404 unknown user |
+| `POST /api/dms/:username/read` | — | 204 | 401, 404 unknown user |
+| `GET /api/stats/rooms` | — | 200: up to 5 most active rooms in the last 7 days | 401 |
+
+### DM payload
+
+`{ id, from, to, body, createdAt }`
+
+`from` or `to` is `null` if that user was deleted.
+
+### Socket
+
+| Direction | Event | Data | Notes |
+|---|---|---|---|
+| Client to server | `dm:send` | `{ toUsername, body }` with an ack callback | Body must be 1-500 characters after trimming |
+| Server to client | `dm:new` | DM payload | Sent to sender and recipient user rooms |
+
+Successful ack: `{ ok: true, message, recipientOnline }`.
+
+Error ack: `{ ok: false, error }`.
+
+### Stats
+
+`GET /api/stats/rooms` returns at most 5 rooms, ordered by message count descending, for the last 7 days.
