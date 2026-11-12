@@ -149,6 +149,7 @@ const commands = {
   help: function () {
     console.log(styleText('gray', 'Commands:'));
     console.log(styleText('gray', '  /help   show this list'));
+    console.log(styleText('gray', '  /users  who is online'));
     console.log(styleText('gray', '  /quit   leave the chat'));
     console.log(styleText('gray', 'Anything else you type is sent to #general.'));
   },
@@ -156,7 +157,20 @@ const commands = {
     console.log(styleText('gray', 'Bye!'));
     process.exit(0);
   },
+  users: function () {
+    socket.emit('users:list', function (ack) {
+      console.log(styleText('gray', 'Online: ' + ack.users.join(', ')));
+    });
+  },
 };
+
+// Presence: someone opened their first connection, or closed their last one.
+socket.on('user:joined', function (data) {
+  console.log(styleText('gray', '* ' + data.username + ' joined'));
+});
+socket.on('user:left', function (data) {
+  console.log(styleText('gray', '* ' + data.username + ' left'));
+});
 
 // Every line I type is either a command or a message for general.
 rl.on('line', function (line) {

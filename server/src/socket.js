@@ -18,6 +18,29 @@ export function attachSocket(httpServer) {
   io.on('connection', (socket) => {
     socket.join('general');
 
+    // Presence. Every connection of a user joins user:<id>, so that room's size is how many tabs they have open.
+    const { username } = socket.data.user;
+    const userRoom = `user:${socket.data.user.id}`;
+    socket.join(userRoom);
+    if (io.sockets.adapter.rooms.get(userRoom).size === 1) {
+      socket.broadcast.emit('user:joined', { username });
+    }
+
+    // socket.io has already removed this socket from its rooms here, so an empty user room means the last tab closed.
+    socket.on('disconnect', () => {
+      if (!io.sockets.adapter.rooms.has(userRoom)) {
+        io.emit('user:left', { username });
+      }
+    });
+
+    // Names of everyone with at least one open connection, sorted, no duplicates.
+    socket.on('users:list', (ack) => {
+      if (typeof ack !== 'function') return;
+      const names = new Set();
+      for (const s of io.sockets.sockets.values()) names.add(s.data.user.username);
+      ack({ ok: true, users: [...names].sort() });
+    });
+
     // Register personal DM room and DM events.
     registerDmHandlers(io, socket);
 

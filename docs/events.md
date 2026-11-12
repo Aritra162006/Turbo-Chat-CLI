@@ -26,8 +26,11 @@ Errors look like `{ "error": "message text" }`.
 | connect | (handshake) | `auth: { token }` | Bad or missing token: `connect_error` with message `unauthorized`. A good connection joins the `general` room |
 | client to server | `message:send` | `{ room, body }` and an ack callback | Ack: `{ ok: true, message }` or `{ ok: false, error }`. You must be in that room. Body is 1-500 characters after trimming |
 | server to client | `message:new` | message payload | Sent to everyone in the room, including the sender |
+| client to server | `users:list` | ack callback only | Ack: `{ ok: true, users: [username, ...] }`, sorted, each name once |
+| server to client | `user:joined` | `{ username }` | Sent to everyone else when a user opens their **first** connection |
+| server to client | `user:left` | `{ username }` | Sent to everyone when a user closes their **last** connection |
 
-Planned (Aritra): `user:joined`, `user:left`, `users:list` for presence.
+Presence lives in memory only. Every connection joins the socket.io room `user:<id>` (the same room the DM code uses), and that room's size is the number of open tabs. Opening a second tab or closing one of two sends nothing. A server restart forgets everyone, and clients show up again when they reconnect.
 
 ## Rooms (Adarsh)
 
