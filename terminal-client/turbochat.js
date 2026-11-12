@@ -2,6 +2,7 @@
 // Usage: turbochat [server-url]
 import readline from 'node:readline/promises';
 import { Writable } from 'node:stream';
+import { io } from 'socket.io-client';
 
 // Use the server URL typed after the command, or localhost if none was given.
 let base = process.argv[2];
@@ -91,4 +92,62 @@ const result = await logIn();
 const username = result.username;
 const token = result.token;
 console.log('Logged in as ' + username);
-rl.close();
+
+function printMessage(message) {
+  // username is null when the sender's account was deleted.
+  let name = message.username;
+  if (name === null) {
+    name = 'deleted user';
+  }
+  console.log(name + ': ' + message.body);
+}
+
+// History first, so old messages print above any live ones.
+let history;
+try {
+  const res = await fetch(base + '/api/rooms/general/messages', {
+    headers: { Authorization: 'Bearer ' + token },
+  });
+  history = await res.json();
+  if (!res.ok) {
+    console.log(history.error);
+    process.exit(1);
+  }
+} catch (error) {
+  console.log('Cannot reach the server at ' + base);
+  process.exit(1);
+}
+
+for (const message of history) {
+  printMessage(message);
+}
+
+// Open the live connection. The server checks the token before letting us in.
+const socket = io(base, { auth: { token: token } });
+
+// The server already sent this to everyone in the room (us included). We only print it.
+socket.on('message:new', printMessage);
+
+socket.on('connect_error', function (error) {
+  // active = socket.io is still retrying by itself (server down for now). Nothing to do.
+  if (socket.active) {
+    return;
+  }
+  // The server refused us (bad or logged-out token). Retrying would not help.
+  console.log('Connection refused: ' + error.message + '. Log in again.');
+  process.exit(1);
+});
+
+// Every line I type is sent to general. The ack is the server's answer to that one message.
+rl.on('line', function (line) {
+  const body = line.trim();
+  if (body === '') {
+    return;
+  }
+  socket.emit('message:send', { room: 'general', body: body }, function (ack) {
+    // On success nothing to print: our own message comes back as message:new.
+    if (ack.ok === false) {
+      console.log('Not sent: ' + ack.error);
+    }
+  });
+});
