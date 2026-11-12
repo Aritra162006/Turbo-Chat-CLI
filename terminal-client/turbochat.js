@@ -2,6 +2,7 @@
 // Usage: turbochat [server-url]
 import readline from 'node:readline/promises';
 import { Writable } from 'node:stream';
+import { styleText } from 'node:util';
 import { io } from 'socket.io-client';
 
 // Use the server URL typed after the command, or localhost if none was given.
@@ -84,14 +85,14 @@ async function logIn() {
     }
 
     // Wrong password, taken username, etc. Show the server's message and ask again.
-    console.log(data.error);
+    console.log(styleText('red', data.error));
   }
 }
 
 const result = await logIn();
 const username = result.username;
 const token = result.token;
-console.log('Logged in as ' + username);
+console.log(styleText('green', 'Logged in as ' + username + '. Type /help for commands.'));
 
 function printMessage(message) {
   // username is null when the sender's account was deleted.
@@ -99,7 +100,12 @@ function printMessage(message) {
   if (name === null) {
     name = 'deleted user';
   }
-  console.log(name + ': ' + message.body);
+  // My own name in green, everyone else in cyan.
+  let colour = 'cyan';
+  if (name === username) {
+    colour = 'green';
+  }
+  console.log(styleText(['bold', colour], name) + ': ' + message.body);
 }
 
 // History first, so old messages print above any live ones.
@@ -110,7 +116,7 @@ try {
   });
   history = await res.json();
   if (!res.ok) {
-    console.log(history.error);
+    console.log(styleText('red', history.error));
     process.exit(1);
   }
 } catch (error) {
@@ -134,20 +140,48 @@ socket.on('connect_error', function (error) {
     return;
   }
   // The server refused us (bad or logged-out token). Retrying would not help.
-  console.log('Connection refused: ' + error.message + '. Log in again.');
+  console.log(styleText('red', 'Connection refused: ' + error.message + '. Log in again.'));
   process.exit(1);
 });
 
-// Every line I type is sent to general. The ack is the server's answer to that one message.
+// Each command is a function. A line starting with / runs the command with that name.
+const commands = {
+  help: function () {
+    console.log(styleText('gray', 'Commands:'));
+    console.log(styleText('gray', '  /help   show this list'));
+    console.log(styleText('gray', '  /quit   leave the chat'));
+    console.log(styleText('gray', 'Anything else you type is sent to #general.'));
+  },
+  quit: function () {
+    console.log(styleText('gray', 'Bye!'));
+    process.exit(0);
+  },
+};
+
+// Every line I type is either a command or a message for general.
 rl.on('line', function (line) {
   const body = line.trim();
   if (body === '') {
     return;
   }
+
+  if (body.startsWith('/')) {
+    // "/help extra words" -> "help"
+    const name = body.slice(1).split(' ')[0];
+    // Object.hasOwn so names like /toString don't match built-in object properties.
+    if (Object.hasOwn(commands, name)) {
+      commands[name]();
+    } else {
+      console.log(styleText('red', 'Unknown command, try /help'));
+    }
+    return;
+  }
+
+  // The ack is the server's answer to this one message.
   socket.emit('message:send', { room: 'general', body: body }, function (ack) {
     // On success nothing to print: our own message comes back as message:new.
     if (ack.ok === false) {
-      console.log('Not sent: ' + ack.error);
+      console.log(styleText('red', 'Not sent: ' + ack.error));
     }
   });
 });
