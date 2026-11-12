@@ -1,0 +1,29 @@
+-- Evidence: the general-room history query uses the (roomId, createdAt) index.
+-- Same query getGeneralHistory() runs: newest 25 messages of general.
+-- Data: prisma/seed.js (5,000+ messages). Captured 2026-11-13.
+
+ANALYZE
+ messages 
+----------
+     5038
+(1 row)
+
+                                                                             QUERY PLAN                                                                              
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=8.45..10.11 rows=25 width=29) (actual time=0.038..0.046 rows=25.00 loops=1)
+   Buffers: shared hit=5
+   InitPlan 1
+     ->  Index Scan using "Room_name_key" on "Room" r  (cost=0.15..8.17 rows=1 width=4) (actual time=0.018..0.018 rows=1.00 loops=1)
+           Index Cond: (name = 'general'::text)
+           Index Searches: 1
+           Buffers: shared hit=2
+   ->  Index Scan Backward using "Message_roomId_createdAt_idx" on "Message" m  (cost=0.28..335.26 rows=5038 width=29) (actual time=0.036..0.041 rows=25.00 loops=1)
+         Index Cond: ("roomId" = (InitPlan 1).col1)
+         Index Searches: 1
+         Buffers: shared hit=5
+ Planning:
+   Buffers: shared hit=74
+ Planning Time: 0.564 ms
+ Execution Time: 0.085 ms
+(15 rows)
+

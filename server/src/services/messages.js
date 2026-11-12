@@ -16,10 +16,11 @@ export function toPayload(m) {
 }
 
 // Gets the newest 25 messages of the general room, then flips them so the oldest comes first.
+// Sorted by createdAt so Postgres can read the (roomId, createdAt) index instead of sorting.
 export async function getGeneralHistory() {
   const rows = await prisma.message.findMany({
     where: { room: { name: 'general' } },
-    orderBy: { id: 'desc' },
+    orderBy: { createdAt: 'desc' },
     take: HISTORY_SIZE,
     include,
   });
