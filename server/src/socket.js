@@ -1,6 +1,7 @@
 import { Server } from 'socket.io';
 import { findUserByToken } from './services/auth.js';
 import { createMessage } from './services/messages.js';
+import { registerDmHandlers } from './socket/dms.js';
 
 // Starts socket.io on the same HTTP server as Express.
 export function attachSocket(httpServer) {
@@ -16,6 +17,9 @@ export function attachSocket(httpServer) {
 
   io.on('connection', (socket) => {
     socket.join('general');
+
+    // Register personal DM room and DM events.
+    registerDmHandlers(io, socket);
 
     // Saves the message, tells everyone in the room, and answers the sender through the ack.
     socket.on('message:send', async (data, ack) => {

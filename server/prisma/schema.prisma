@@ -16,6 +16,10 @@ model User {
   createdAt    DateTime  @default(now())
   sessions     Session[]
   messages     Message[]
+  dmSent       DirectMessage[] @relation("DmSent")
+  dmReceived   DirectMessage[] @relation("DmReceived")
+  dmReads      DmRead[] @relation("DmReadUser")
+  dmReadsOfOther DmRead[] @relation("DmReadOtherUser")
 }
 
 // The token is the primary key: random, so it can't be guessed. Logout deletes the row; no expiry.
