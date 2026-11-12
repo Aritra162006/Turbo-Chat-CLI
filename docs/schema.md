@@ -47,4 +47,57 @@ _To be written by Adarsh._
 
 ## DMs and stats (Prem)
 
-_To be written by Prem._
+### DirectMessage
+
+| Column | Type | Details |
+|---|---|---|
+| id | Int | Primary key, auto-increment |
+| senderId | Int? | Foreign key to User(id), ON DELETE SET NULL |
+| recipientId | Int? | Foreign key to User(id), ON DELETE SET NULL |
+| body | String | Message content |
+| createdAt | DateTime | Defaults to now() |
+
+- CHECK constraint: `senderId <> recipientId`
+- Index: `(senderId, recipientId, id)`
+
+### DmRead
+
+| Column | Type | Details |
+|---|---|---|
+| userId | Int | Foreign key to User(id), ON DELETE CASCADE |
+| otherUserId | Int | Foreign key to User(id), ON DELETE CASCADE |
+| lastReadAt | DateTime | Defaults to now() |
+
+- Composite primary key: `(userId, otherUserId)`
+
+### Most Active Rooms
+
+The `mostActiveRooms()` service uses a tagged Prisma `$queryRaw` query to return the five rooms with the highest message counts in the last seven days.
+
+#### EXPLAIN ANALYZE
+
+Executed using:
+
+`EXPLAIN (ANALYZE, BUFFERS)`
+
+Observed execution plan:
+
+- `Seq Scan` on `Message`: 22 rows matched the seven-day filter.
+- `Seq Scan` on `Room`: 1 row scanned.
+- `Hash Join`: joined messages with rooms using `roomId`.
+- `HashAggregate`: grouped messages by room ID.
+- `Sort`: quicksort, 25 kB memory.
+- `Limit`: returned 1 room (fewer than the maximum of 5).
+
+Observed metrics:
+
+| Metric | Result |
+|---|---:|
+| Planning Time | 1.677 ms |
+| Execution Time | 0.340 ms |
+| Shared buffer hits | 5 |
+| Message rows processed | 22 |
+| Rooms returned | 1 |
+
+Both tables used sequential scans. Given the small amount of data in this test database, PostgreSQL chose sequential scans instead of index scans. This is an observed plan, not evidence that indexes are unnecessary for larger datasets.
+EOF
