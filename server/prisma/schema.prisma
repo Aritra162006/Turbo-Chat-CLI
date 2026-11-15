@@ -20,6 +20,7 @@ model User {
   dmReceived   DirectMessage[] @relation("DmReceived")
   dmReads      DmRead[] @relation("DmReadUser")
   dmReadsOfOther DmRead[] @relation("DmReadOtherUser")
+  roomMemberships RoomMember[]
 }
 
 // The token is the primary key: random, so it can't be guessed. Logout deletes the row; no expiry.
@@ -35,6 +36,7 @@ model Room {
   name      String    @unique
   createdAt DateTime  @default(now())
   messages  Message[]
+  members   RoomMember[]
 }
 
 // userId is nullable: deleting a user keeps their messages as "deleted user" (SET NULL).
