@@ -1,7 +1,8 @@
 model RoomMember {
-  roomId Int
-  userId Int
-  role   String @default("member")
+  roomId   Int
+  userId   Int
+  role     String   @default("member")
+  joinedAt DateTime @default(now())
 
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
