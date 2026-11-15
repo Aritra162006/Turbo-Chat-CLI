@@ -12,9 +12,9 @@ extract_token() {
   grep -o '"token":"[^"]*"' "$1" | head -n1 | cut -d'"' -f4
 }
 
-SUFFIX="$(date +%s)$$"
-USER_A="rmusera${SUFFIX}"
-USER_B="rmuserb${SUFFIX}"
+SUFFIX="${RANDOM}${RANDOM}"
+USER_A="rma_${SUFFIX}"
+USER_B="rmb_${SUFFIX}"
 PASSWORD="TestPass123"
 
 echo "Running Rooms REST API checks against $BASE_URL..."
