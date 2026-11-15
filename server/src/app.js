@@ -1,6 +1,7 @@
 import express from 'express';
 import { authRouter } from './routes/auth.js';
 import { messagesRouter } from './routes/messages.js';
+import { roomsRouter } from './routes/rooms.js';
 import { dmsRouter } from './routes/dms.js';
 import { statsRouter } from './routes/stats.js';
 
@@ -9,6 +10,7 @@ export const app = express();
 app.use(express.json());
 app.use('/api', authRouter);
 app.use('/api', messagesRouter);
+app.use('/api', roomsRouter);
 app.use('/api', dmsRouter);
 app.use('/api', statsRouter);
 
