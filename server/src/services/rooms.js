@@ -1,4 +1,5 @@
 import { prisma } from '../db.js';
+import { toPayload, include } from './messages.js';
 
 export const ROOM_NAME_REGEX = /^[a-z0-9_-]{1,30}$/;
 
@@ -178,4 +179,65 @@ export async function leaveRoom(userId, name) {
 
   return { ok: true };
 }
+
+const HISTORY_SIZE = 25;
+
+/**
+ * Returns the last 25 messages of a room, oldest first.
+ * Rejects non-members with 403 and unknown rooms with 404.
+ * General room is accessible to all users.
+ */
+export async function getRoomHistory(userId, name) {
+  const room = await prisma.room.findUnique({ where: { name } });
+  if (!room) {
+    const err = new Error('Room not found');
+    err.status = 404;
+    throw err;
+  }
+
+  if (name !== 'general') {
+    const member = await prisma.roomMember.findUnique({
+      where: {
+        roomId_userId: {
+          roomId: room.id,
+          userId,
+        },
+      },
+    });
+
+    if (!member) {
+      const err = new Error('Forbidden: you are not a member of this room');
+      err.status = 403;
+      throw err;
+    }
+  }
+
+  const rows = await prisma.message.findMany({
+    where: { roomId: room.id },
+    orderBy: { createdAt: 'desc' },
+    take: HISTORY_SIZE,
+    include,
+  });
+
+  return rows.reverse().map(toPayload);
+}
+
+/**
+ * Returns an array of room names that the user belongs to.
+ * Used to restore room subscriptions upon socket reconnect.
+ */
+export async function getMyRoomNames(userId) {
+  const memberships = await prisma.roomMember.findMany({
+    where: { userId },
+    include: {
+      room: {
+        select: { name: true },
+      },
+    },
+    orderBy: { joinedAt: 'asc' },
+  });
+
+  return memberships.map((m) => m.room.name);
+}
+
 
