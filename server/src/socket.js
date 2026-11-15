@@ -2,6 +2,7 @@ import { Server } from 'socket.io';
 import { findUserByToken } from './services/auth.js';
 import { createMessage } from './services/messages.js';
 import { registerDmHandlers } from './socket/dms.js';
+import { registerRoomHandlers } from './socket/rooms.js';
 
 // Starts socket.io on the same HTTP server as Express.
 export function attachSocket(httpServer) {
@@ -17,6 +18,7 @@ export function attachSocket(httpServer) {
 
   io.on('connection', (socket) => {
     socket.join('general');
+    registerRoomHandlers(io, socket);
 
     // Presence. Every connection of a user joins user:<id>, so that room's size is how many tabs they have open.
     const { username } = socket.data.user;
