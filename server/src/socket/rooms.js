@@ -1,4 +1,4 @@
-import { joinRoom, leaveRoom } from '../services/rooms.js';
+import { joinRoom, leaveRoom, getMyRoomNames } from '../services/rooms.js';
 
 export function registerRoomHandlers(io, socket) {
   // Registers room:join listener
@@ -44,4 +44,17 @@ export function registerRoomHandlers(io, socket) {
       reply({ ok: false, error: 'Server error' });
     }
   });
+
+  // Reconnection handling: fetch memberships and rejoin
+  (async () => {
+    try {
+      const roomNames = await getMyRoomNames(socket.data.user.id);
+      for (const name of roomNames) {
+        socket.join(name);
+      }
+    } catch (err) {
+      console.error('Failed to restore room memberships on reconnect:', err);
+    }
+  })();
 }
+
