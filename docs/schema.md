@@ -43,7 +43,34 @@ Signup creates the `User` and its first `Session` in one nested write, so you ne
 
 ## Rooms (Adarsh)
 
-_To be written by Adarsh._
+Defined in `server/prisma/models/rooms.prisma` and extended in `server/prisma/schema.prisma`.
+
+### RoomMember
+
+Represents a user's membership within a specific chat room. The `general` room does not use `RoomMember` records since all users are automatically members.
+
+| Column | Type | Details |
+|---|---|---|
+| roomId | Int | Foreign key to Room(id), ON DELETE CASCADE |
+| userId | Int | Foreign key to User(id), ON DELETE CASCADE |
+| role | String | Membership role: `'owner'` for creator, `'member'` for joiners. Defaults to `'member'` |
+| joinedAt | DateTime | Membership timestamp, defaults to `now()` |
+
+- **Composite Primary Key**: `(roomId, userId)`
+- **Foreign Keys**:
+  - `roomId` references `Room(id)` with `ON DELETE CASCADE` (deleting a room deletes its memberships).
+  - `userId` references `User(id)` with `ON DELETE CASCADE` (deleting a user removes them from all rooms).
+- **Index**:
+  - `@@index([userId])` (`RoomMember_userId_idx`): Speeds up lookups of all rooms a user belongs to, such as `getMyRoomNames(userId)` and `listRooms(userId)`.
+- **Database CHECK Constraints**:
+  - `RoomMember_role_check`: `CHECK ("role" IN ('owner', 'member'))` ensures role can only be `'owner'` or `'member'`.
+  - `Room_name_check`: `CHECK ("name" ~ '^[a-z0-9_-]{1,30}$')` enforces valid room name characters and length at the database layer.
+
+### Room Creation and Membership Lifecycle
+- When a user joins a room that does not exist, the `Room` row and the initial `RoomMember` row with role `'owner'` are created together in a single atomic Prisma transaction (`prisma.$transaction`).
+- Subsequent joins create a `RoomMember` row with role `'member'`.
+- Duplicate joins are idempotent and do not create duplicate rows due to the composite primary key `(roomId, userId)`.
+- Leaving a room deletes the corresponding `RoomMember` row.
 
 ## DMs and stats (Prem)
 
