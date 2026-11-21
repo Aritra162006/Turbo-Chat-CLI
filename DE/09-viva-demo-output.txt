@@ -1,0 +1,375 @@
+=== SETUP: room memberships for the demo (05-sample-data.sql has none) ===
+INSERT INTO "Room" ("name") VALUES ('random'), ('dev') ON CONFLICT ("name") DO NOTHING;
+INSERT 0 0
+INSERT INTO "RoomMember" ("roomId", "userId", "role")
+SELECT r."id", u."id", v.role
+FROM (VALUES ('dev', 'alice', 'owner'), ('dev', 'carol', 'member'),
+             ('random', 'bob', 'owner'), ('random', 'alice', 'member')) AS v(room, username, role)
+JOIN "Room" r ON r."name" = v.room
+JOIN "User" u ON u."username" = v.username
+ON CONFLICT ("roomId", "userId") DO NOTHING;
+INSERT 0 0
+=== Q1a. What the data looks like: a sample of each table ===
+SELECT "id", "username", left("passwordHash", 12) || '...' AS "passwordHash", "createdAt"::date
+FROM "User" ORDER BY "id" LIMIT 5;
+ id | username |  passwordHash   | createdAt  
+----+----------+-----------------+------------
+  1 | alice    | $2b$10$DmLqA... | 2026-10-22
+  2 | bob      | $2b$10$DmLqA... | 2026-10-23
+  3 | carol    | $2b$10$DmLqA... | 2026-11-01
+  4 | dave     | $2b$10$DmLqA... | 2026-11-11
+  5 | eve      | $2b$10$DmLqA... | 2026-11-19
+(5 rows)
+
+SELECT left("token", 8) || '...' AS token, "userId" FROM "Session" LIMIT 3;
+    token    | userId 
+-------------+--------
+ 187160c1... |      1
+ 00201648... |      1
+ 314ac9b0... |      2
+(3 rows)
+
+SELECT "id", "roomId", "userId", "body", "createdAt" FROM "Message" ORDER BY "createdAt" DESC LIMIT 5;
+ id | roomId | userId |           body           |        createdAt        
+----+--------+--------+--------------------------+-------------------------
+  8 |      1 |      3 | Welcome eve              | 2026-11-20 19:07:43.047
+  7 |      1 |      5 | Just joined, hello!      | 2026-11-20 19:07:13.047
+ 13 |      3 |      3 | Reviewing it now         | 2026-11-19 19:12:13.047
+  6 |      1 |      2 | Same here                | 2026-11-19 19:07:13.047
+ 12 |      3 |      1 | Pushed the socket.io fix | 2026-11-19 19:07:13.047
+(5 rows)
+
+SELECT "id", "senderId", "recipientId", "body" FROM "DirectMessage" ORDER BY "id" DESC LIMIT 3;
+ id | senderId | recipientId |           body            
+----+----------+-------------+---------------------------
+  7 |        2 |           4 | Thanks dave
+  6 |        4 |           2 | Notes from class attached
+  5 |        3 |           1 | Ping
+(3 rows)
+
+=== Q1b. Most frequent operation 1: auth check on every REST call and socket connect ===
+(findUserByToken in services/auth.js)
+SELECT u."id", u."username"
+FROM "Session" s JOIN "User" u ON u."id" = s."userId"
+WHERE s."token" = (SELECT "token" FROM "Session" LIMIT 1);
+ id | username 
+----+----------
+  1 | alice
+(1 row)
+
+=== Q1c. Most frequent operation 2: send a message (createMessage), rolled back ===
+BEGIN;
+BEGIN
+INSERT INTO "Message" ("roomId", "userId", "body")
+VALUES ((SELECT "id" FROM "Room" WHERE "name" = 'general'),
+        (SELECT "id" FROM "User" WHERE "username" = 'alice'), 'live demo message')
+RETURNING "id", "roomId", "userId", "body";
+  id  | roomId | userId |       body        
+------+--------+--------+-------------------
+ 5018 |      1 |      1 | live demo message
+(1 row)
+
+INSERT 0 1
+ROLLBACK;
+ROLLBACK
+=== Q1d. Most frequent operation 3: history, newest 25 of a room, oldest first (getRoomHistory) ===
+SELECT * FROM (
+  SELECT m."id", COALESCE(u."username", 'deleted user') AS username, m."body", m."createdAt"
+  FROM "Message" m
+  JOIN "Room" r ON r."id" = m."roomId"
+  LEFT JOIN "User" u ON u."id" = m."userId"
+  WHERE r."name" = 'general'
+  ORDER BY m."createdAt" DESC
+  LIMIT 25
+) latest ORDER BY "createdAt";
+ id | username |               body               |        createdAt        
+----+----------+----------------------------------+-------------------------
+ 15 | alice    | Older general message            | 2026-11-06 19:07:13.047
+  1 | alice    | Hi everyone!                     | 2026-11-15 19:07:13.047
+  2 | bob      | Hey alice                        | 2026-11-15 19:08:13.047
+  3 | carol    | Morning all                      | 2026-11-16 19:07:13.047
+  4 | alice    | Did anyone finish the DE report? | 2026-11-18 19:07:13.047
+  5 | dave     | Working on it                    | 2026-11-18 19:09:13.047
+  6 | bob      | Same here                        | 2026-11-19 19:07:13.047
+  7 | eve      | Just joined, hello!              | 2026-11-20 19:07:13.047
+  8 | carol    | Welcome eve                      | 2026-11-20 19:07:43.047
+(9 rows)
+
+=== Q2a. The M:N junction table ===
+                              Table "public.RoomMember"
+  Column  |              Type              | Collation | Nullable |      Default      
+----------+--------------------------------+-----------+----------+-------------------
+ roomId   | integer                        |           | not null | 
+ userId   | integer                        |           | not null | 
+ role     | text                           |           | not null | 'member'::text
+ joinedAt | timestamp(3) without time zone |           | not null | CURRENT_TIMESTAMP
+Indexes:
+    "RoomMember_pkey" PRIMARY KEY, btree ("roomId", "userId")
+    "RoomMember_userId_idx" btree ("userId")
+Check constraints:
+    "RoomMember_role_check" CHECK (role = ANY (ARRAY['owner'::text, 'member'::text]))
+Foreign-key constraints:
+    "RoomMember_roomId_fkey" FOREIGN KEY ("roomId") REFERENCES "Room"(id) ON UPDATE CASCADE ON DELETE CASCADE
+    "RoomMember_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE CASCADE
+
+=== Q2b. Read across the M:N: which rooms is each user in, and with what role ===
+SELECT u."username", r."name" AS room, rm."role", rm."joinedAt"::date AS joined
+FROM "User" u
+JOIN "RoomMember" rm ON rm."userId" = u."id"
+JOIN "Room" r        ON r."id" = rm."roomId"
+ORDER BY u."username", r."name";
+ username |  room  |  role  |   joined   
+----------+--------+--------+------------
+ alice    | dev    | owner  | 2026-11-21
+ alice    | random | member | 2026-11-21
+ bob      | random | owner  | 2026-11-21
+ carol    | dev    | member | 2026-11-21
+(4 rows)
+
+=== Q2c. Other direction: members per room (listRooms memberCount) ===
+SELECT r."name" AS room, COUNT(rm."userId") AS members,
+       string_agg(u."username", ', ' ORDER BY u."username") AS who
+FROM "Room" r
+LEFT JOIN "RoomMember" rm ON rm."roomId" = r."id"
+LEFT JOIN "User" u        ON u."id" = rm."userId"
+GROUP BY r."id", r."name"
+ORDER BY r."name";
+  room   | members |     who      
+---------+---------+--------------
+ dev     |       2 | alice, carol
+ general |       0 | 
+ random  |       2 | alice, bob
+(3 rows)
+
+general shows 0 here on purpose: general has no RoomMember rows, every user is in it (see Q3).
+=== Q3. Derived values are computed, not stored: unread count per sender for alice ===
+SELECT s."username" AS sender, COUNT(dm."id") AS unread
+FROM "DirectMessage" dm
+JOIN "User" s ON s."id" = dm."senderId"
+LEFT JOIN "DmRead" dr ON dr."userId" = dm."recipientId" AND dr."otherUserId" = dm."senderId"
+WHERE dm."recipientId" = (SELECT "id" FROM "User" WHERE "username" = 'alice')
+  AND dm."createdAt" > COALESCE(dr."lastReadAt", 'epoch')
+GROUP BY s."username"
+ORDER BY unread DESC;
+ sender | unread 
+--------+--------
+ carol  |      2
+(1 row)
+
+=== Q4a. Every constraint the database enforces ===
+SELECT conrelid::regclass AS "table", conname AS "constraint",
+       CASE contype WHEN 'p' THEN 'PRIMARY KEY' WHEN 'f' THEN 'FOREIGN KEY'
+                    WHEN 'u' THEN 'UNIQUE' WHEN 'c' THEN 'CHECK' END AS type,
+       pg_get_constraintdef(oid) AS definition
+FROM pg_constraint
+WHERE connamespace = 'public'::regnamespace
+ORDER BY 1, 3, 2;
+      table      |              constraint              |    type     |                                       definition                                       
+-----------------+--------------------------------------+-------------+----------------------------------------------------------------------------------------
+ "User"          | User_pkey                            | PRIMARY KEY | PRIMARY KEY (id)
+ "Session"       | Session_userId_fkey                  | FOREIGN KEY | FOREIGN KEY ("userId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE CASCADE
+ "Session"       | Session_pkey                         | PRIMARY KEY | PRIMARY KEY (token)
+ "Room"          | Room_name_check                      | CHECK       | CHECK ((name ~ '^[a-z0-9_-]{1,30}$'::text))
+ "Room"          | Room_pkey                            | PRIMARY KEY | PRIMARY KEY (id)
+ "Message"       | Message_roomId_fkey                  | FOREIGN KEY | FOREIGN KEY ("roomId") REFERENCES "Room"(id) ON UPDATE CASCADE ON DELETE CASCADE
+ "Message"       | Message_userId_fkey                  | FOREIGN KEY | FOREIGN KEY ("userId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE SET NULL
+ "Message"       | Message_pkey                         | PRIMARY KEY | PRIMARY KEY (id)
+ "DirectMessage" | DirectMessage_sender_recipient_check | CHECK       | CHECK (("senderId" <> "recipientId"))
+ "DirectMessage" | DirectMessage_recipientId_fkey       | FOREIGN KEY | FOREIGN KEY ("recipientId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE SET NULL
+ "DirectMessage" | DirectMessage_senderId_fkey          | FOREIGN KEY | FOREIGN KEY ("senderId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE SET NULL
+ "DirectMessage" | DirectMessage_pkey                   | PRIMARY KEY | PRIMARY KEY (id)
+ "DmRead"        | DmRead_otherUserId_fkey              | FOREIGN KEY | FOREIGN KEY ("otherUserId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE CASCADE
+ "DmRead"        | DmRead_userId_fkey                   | FOREIGN KEY | FOREIGN KEY ("userId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE CASCADE
+ "DmRead"        | DmRead_pkey                          | PRIMARY KEY | PRIMARY KEY ("userId", "otherUserId")
+ "RoomMember"    | RoomMember_role_check                | CHECK       | CHECK ((role = ANY (ARRAY['owner'::text, 'member'::text])))
+ "RoomMember"    | RoomMember_roomId_fkey               | FOREIGN KEY | FOREIGN KEY ("roomId") REFERENCES "Room"(id) ON UPDATE CASCADE ON DELETE CASCADE
+ "RoomMember"    | RoomMember_userId_fkey               | FOREIGN KEY | FOREIGN KEY ("userId") REFERENCES "User"(id) ON UPDATE CASCADE ON DELETE CASCADE
+ "RoomMember"    | RoomMember_pkey                      | PRIMARY KEY | PRIMARY KEY ("roomId", "userId")
+(19 rows)
+
+User.username and Room.name uniqueness are UNIQUE INDEXES (Prisma @unique), so they show in Q5a, not here.
+=== Q4b. The database rejects bad data (each statement below should FAIL) ===
+--- room name with capitals and a space (CHECK Room_name_check) ---
+INSERT INTO "Room" ("name") VALUES ('My Room!');
+psql:/tmp/pg/09-viva-demo.sql:100: ERROR:  new row for relation "Room" violates check constraint "Room_name_check"
+DETAIL:  Failing row contains (10, My Room!, 2026-11-21 19:08:33.45).
+--- invalid role (CHECK RoomMember_role_check) ---
+INSERT INTO "RoomMember" ("roomId", "userId", "role")
+VALUES ((SELECT "id" FROM "Room" WHERE "name" = 'dev'), (SELECT "id" FROM "User" WHERE "username" = 'bob'), 'admin');
+psql:/tmp/pg/09-viva-demo.sql:103: ERROR:  new row for relation "RoomMember" violates check constraint "RoomMember_role_check"
+DETAIL:  Failing row contains (3, 2, admin, 2026-11-21 19:08:33.45).
+--- same user joins the same room twice (composite PRIMARY KEY) ---
+INSERT INTO "RoomMember" ("roomId", "userId")
+VALUES ((SELECT "id" FROM "Room" WHERE "name" = 'dev'), (SELECT "id" FROM "User" WHERE "username" = 'alice'));
+psql:/tmp/pg/09-viva-demo.sql:106: ERROR:  duplicate key value violates unique constraint "RoomMember_pkey"
+DETAIL:  Key ("roomId", "userId")=(3, 1) already exists.
+--- membership in a room that does not exist (FOREIGN KEY) ---
+INSERT INTO "RoomMember" ("roomId", "userId") VALUES (99999, (SELECT "id" FROM "User" WHERE "username" = 'alice'));
+psql:/tmp/pg/09-viva-demo.sql:108: ERROR:  insert or update on table "RoomMember" violates foreign key constraint "RoomMember_roomId_fkey"
+DETAIL:  Key (roomId)=(99999) is not present in table "Room".
+--- DM to yourself (CHECK DirectMessage_sender_recipient_check) ---
+INSERT INTO "DirectMessage" ("senderId", "recipientId", "body")
+SELECT "id", "id", 'note to self' FROM "User" WHERE "username" = 'alice';
+psql:/tmp/pg/09-viva-demo.sql:111: ERROR:  new row for relation "DirectMessage" violates check constraint "DirectMessage_sender_recipient_check"
+DETAIL:  Failing row contains (19989, 1, 1, note to self, 2026-11-21 19:08:33.452).
+--- duplicate username (UNIQUE) ---
+INSERT INTO "User" ("username", "passwordHash") VALUES ('alice', 'x');
+psql:/tmp/pg/09-viva-demo.sql:113: ERROR:  duplicate key value violates unique constraint "User_username_key"
+DETAIL:  Key (username)=(alice) already exists.
+--- message with no body (NOT NULL) ---
+INSERT INTO "Message" ("roomId", "body") VALUES ((SELECT "id" FROM "Room" WHERE "name" = 'general'), NULL);
+psql:/tmp/pg/09-viva-demo.sql:115: ERROR:  null value in column "body" of relation "Message" violates not-null constraint
+DETAIL:  Failing row contains (5019, 1, null, null, 2026-11-21 19:08:33.458).
+=== Q4c. Atomicity: create a room + its owner, second insert fails, the room is NOT kept ===
+(same two inserts as prisma.$transaction in joinRoom, services/rooms.js)
+BEGIN;
+BEGIN
+INSERT INTO "Room" ("name") VALUES ('viva-demo') RETURNING "id", "name";
+ id |   name    
+----+-----------
+ 11 | viva-demo
+(1 row)
+
+INSERT 0 1
+INSERT INTO "RoomMember" ("roomId", "userId", "role")
+VALUES ((SELECT "id" FROM "Room" WHERE "name" = 'viva-demo'),
+        (SELECT "id" FROM "User" WHERE "username" = 'alice'), 'boss');
+psql:/tmp/pg/09-viva-demo.sql:123: ERROR:  new row for relation "RoomMember" violates check constraint "RoomMember_role_check"
+DETAIL:  Failing row contains (11, 1, boss, 2026-11-21 19:08:33.458).
+ROLLBACK;
+ROLLBACK
+SELECT COUNT(*) AS "viva-demo rooms after the failed transaction" FROM "Room" WHERE "name" = 'viva-demo';
+ viva-demo rooms after the failed transaction 
+----------------------------------------------
+                                            0
+(1 row)
+
+=== Q4d. Isolation level the app runs at (Prisma does not change the Postgres default) ===
+SHOW transaction_isolation;
+ transaction_isolation 
+-----------------------
+ read committed
+(1 row)
+
+=== Q5a. Every index ===
+SELECT tablename AS "table", indexname AS "index", indexdef AS definition
+FROM pg_indexes WHERE schemaname = 'public' ORDER BY tablename, indexname;
+     table     |                   index                   |                                                           definition                                                           
+---------------+-------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------
+ DirectMessage | DirectMessage_pkey                        | CREATE UNIQUE INDEX "DirectMessage_pkey" ON public."DirectMessage" USING btree (id)
+ DirectMessage | DirectMessage_senderId_recipientId_id_idx | CREATE INDEX "DirectMessage_senderId_recipientId_id_idx" ON public."DirectMessage" USING btree ("senderId", "recipientId", id)
+ DmRead        | DmRead_pkey                               | CREATE UNIQUE INDEX "DmRead_pkey" ON public."DmRead" USING btree ("userId", "otherUserId")
+ Message       | Message_pkey                              | CREATE UNIQUE INDEX "Message_pkey" ON public."Message" USING btree (id)
+ Message       | Message_roomId_createdAt_idx              | CREATE INDEX "Message_roomId_createdAt_idx" ON public."Message" USING btree ("roomId", "createdAt")
+ Room          | Room_name_key                             | CREATE UNIQUE INDEX "Room_name_key" ON public."Room" USING btree (name)
+ Room          | Room_pkey                                 | CREATE UNIQUE INDEX "Room_pkey" ON public."Room" USING btree (id)
+ RoomMember    | RoomMember_pkey                           | CREATE UNIQUE INDEX "RoomMember_pkey" ON public."RoomMember" USING btree ("roomId", "userId")
+ RoomMember    | RoomMember_userId_idx                     | CREATE INDEX "RoomMember_userId_idx" ON public."RoomMember" USING btree ("userId")
+ Session       | Session_pkey                              | CREATE UNIQUE INDEX "Session_pkey" ON public."Session" USING btree (token)
+ User          | User_pkey                                 | CREATE UNIQUE INDEX "User_pkey" ON public."User" USING btree (id)
+ User          | User_username_key                         | CREATE UNIQUE INDEX "User_username_key" ON public."User" USING btree (username)
+(12 rows)
+
+=== Q5b. Index evidence on bigger data (all rolled back) ===
+BEGIN;
+BEGIN
+INSERT INTO "Message" ("roomId", "userId", "body", "createdAt")
+SELECT (SELECT "id" FROM "Room" WHERE "name" = 'general'), NULL, 'bulk ' || i, now() - i * interval '1 minute'
+FROM generate_series(1, 5000) i;
+INSERT 0 5000
+INSERT INTO "User" ("username", "passwordHash")
+SELECT 'bulk_' || i, 'x' FROM generate_series(1, 2000) i;
+INSERT 0 2000
+INSERT INTO "RoomMember" ("roomId", "userId")
+SELECT (SELECT "id" FROM "Room" WHERE "name" = 'random'), "id" FROM "User" WHERE "username" LIKE 'bulk_%';
+INSERT 0 2000
+INSERT INTO "DirectMessage" ("senderId", "recipientId", "body", "createdAt")
+SELECT a."id", b."id", 'bulk dm', now() - (g * interval '1 minute')
+FROM generate_series(1, 20000) g
+JOIN "User" a ON a."username" = 'bulk_' || (1 + g % 2000)
+JOIN "User" b ON b."username" = 'bulk_' || (1 + (g * 7) % 2000)
+WHERE a."id" <> b."id";
+INSERT 0 19980
+ANALYZE;
+ANALYZE
+--- history: newest 25 of general -> Index Scan Backward on Message_roomId_createdAt_idx ---
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT "id", "body", "createdAt" FROM "Message"
+WHERE "roomId" = (SELECT "id" FROM "Room" WHERE "name" = 'general')
+ORDER BY "createdAt" DESC LIMIT 25;
+                                              QUERY PLAN                                              
+------------------------------------------------------------------------------------------------------
+ Limit (actual rows=25 loops=1)
+   InitPlan 1 (returns $0)
+     ->  Seq Scan on "Room" (actual rows=1 loops=1)
+           Filter: (name = 'general'::text)
+           Rows Removed by Filter: 2
+   ->  Index Scan Backward using "Message_roomId_createdAt_idx" on "Message" (actual rows=25 loops=1)
+         Index Cond: ("roomId" = $0)
+(7 rows)
+
+--- rooms of one user (getMyRoomNames) -> RoomMember_userId_idx ---
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT r."name" FROM "RoomMember" rm JOIN "Room" r ON r."id" = rm."roomId"
+WHERE rm."userId" = (SELECT "id" FROM "User" WHERE "username" = 'bulk_42');
+                                        QUERY PLAN                                         
+-------------------------------------------------------------------------------------------
+ Nested Loop (actual rows=1 loops=1)
+   Join Filter: (rm."roomId" = r.id)
+   Rows Removed by Join Filter: 1
+   InitPlan 1 (returns $0)
+     ->  Index Scan using "User_username_key" on "User" (actual rows=1 loops=1)
+           Index Cond: (username = 'bulk_42'::text)
+   ->  Index Scan using "RoomMember_userId_idx" on "RoomMember" rm (actual rows=1 loops=1)
+         Index Cond: ("userId" = $0)
+   ->  Seq Scan on "Room" r (actual rows=2 loops=1)
+(9 rows)
+
+--- unread DMs for one user: filters on recipientId, no index starts with it -> Seq Scan ---
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT COUNT(*) FROM "DirectMessage"
+WHERE "recipientId" = (SELECT "id" FROM "User" WHERE "username" = 'bulk_42');
+                                   QUERY PLAN                                   
+--------------------------------------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   InitPlan 1 (returns $0)
+     ->  Index Scan using "User_username_key" on "User" (actual rows=1 loops=1)
+           Index Cond: (username = 'bulk_42'::text)
+   ->  Seq Scan on "DirectMessage" (actual rows=10 loops=1)
+         Filter: ("recipientId" = $0)
+         Rows Removed by Filter: 19977
+(7 rows)
+
+--- the fix we would ship at 100x: index on (recipientId, createdAt), same query again ---
+CREATE INDEX "DirectMessage_recipientId_createdAt_idx" ON "DirectMessage"("recipientId", "createdAt");
+CREATE INDEX
+ANALYZE "DirectMessage";
+ANALYZE
+EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF)
+SELECT COUNT(*) FROM "DirectMessage"
+WHERE "recipientId" = (SELECT "id" FROM "User" WHERE "username" = 'bulk_42');
+                                             QUERY PLAN                                              
+-----------------------------------------------------------------------------------------------------
+ Aggregate (actual rows=1 loops=1)
+   InitPlan 1 (returns $0)
+     ->  Index Scan using "User_username_key" on "User" (actual rows=1 loops=1)
+           Index Cond: (username = 'bulk_42'::text)
+   ->  Bitmap Heap Scan on "DirectMessage" (actual rows=10 loops=1)
+         Recheck Cond: ("recipientId" = $0)
+         Heap Blocks: exact=10
+         ->  Bitmap Index Scan on "DirectMessage_recipientId_createdAt_idx" (actual rows=10 loops=1)
+               Index Cond: ("recipientId" = $0)
+(9 rows)
+
+ROLLBACK;
+ROLLBACK
+=== Row counts (nothing from the demo was kept except the RoomMember setup) ===
+SELECT (SELECT COUNT(*) FROM "User") AS users, (SELECT COUNT(*) FROM "Session") AS sessions,
+       (SELECT COUNT(*) FROM "Room") AS rooms, (SELECT COUNT(*) FROM "RoomMember") AS memberships,
+       (SELECT COUNT(*) FROM "Message") AS messages, (SELECT COUNT(*) FROM "DirectMessage") AS dms,
+       (SELECT COUNT(*) FROM "DmRead") AS read_markers;
+ users | sessions | rooms | memberships | messages | dms | read_markers 
+-------+----------+-------+-------------+----------+-----+--------------
+     5 |        5 |     3 |           4 |       15 |   7 |            2
+(1 row)
+
